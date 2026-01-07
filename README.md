@@ -400,14 +400,17 @@ Or directly:
 ```bash
 pytest tests/ -v
 ```
+## Design Decisions
+
+- **Idempotency**: Enforced via SQLite PRIMARY KEY on message_id; duplicates handled gracefully.
+- **HMAC verification**: Computed on raw request body bytes using HMAC-SHA256 and constant-time comparison.
+- **Validation**: Pydantic models with field aliases to map external API fields (`from`, `to`) to internal schema.
+- **Pagination**: Deterministic ordering by ts ASC, message_id ASC with total count independent of limit/offset.
+- **Observability**: Structured JSON logs per request and Prometheus-style metrics.
 
 ## Setup Used (AI Tools Disclosure)
 
-This project was developed with the assistance of AI coding tools (Cursor AI) for:
-- Code generation and implementation
-- Architecture decisions and best practices
-- Documentation and README creation
-- Testing and verification
+This project was developed with the assistance of AI coding tools: Cursor AI & ChatGPT.
 
 The implementation follows FastAPI best practices, production-ready patterns, and industry standards for webhook handling, idempotency, and observability.
 
