@@ -140,37 +140,53 @@ def compute_stats() -> Dict[str, Any]:
     Compute aggregated statistics about messages.
     
     Returns:
-        Dictionary with aggregated statistics
+        Dictionary with aggregated statistics including:
+        - total_messages
+        - senders_count
+        - messages_per_sender (top 10, sorted desc)
+        - first_message_ts
+        - last_message_ts
     """
     conn = get_db_connection()
     
     # Total messages
     total = conn.execute("SELECT COUNT(*) as total FROM messages").fetchone()["total"]
     
-    # Unique senders
-    unique_senders = conn.execute(
+    # Unique senders count
+    senders_count = conn.execute(
         "SELECT COUNT(DISTINCT from_msisdn) as count FROM messages"
     ).fetchone()["count"]
     
-    # Unique recipients
-    unique_recipients = conn.execute(
-        "SELECT COUNT(DISTINCT to_msisdn) as count FROM messages"
-    ).fetchone()["count"]
+    # Messages per sender (top 10, sorted desc)
+    messages_per_sender = conn.execute("""
+        SELECT from_msisdn, COUNT(*) as count
+        FROM messages
+        GROUP BY from_msisdn
+        ORDER BY count DESC
+        LIMIT 10
+    """).fetchall()
     
-    # Messages with text vs without text
-    messages_with_text = conn.execute(
-        "SELECT COUNT(*) as count FROM messages WHERE text IS NOT NULL AND text != ''"
-    ).fetchone()["count"]
+    messages_per_sender_list = [
+        {"from_msisdn": row["from_msisdn"], "count": row["count"]}
+        for row in messages_per_sender
+    ]
     
-    messages_without_text = total - messages_with_text
+    # First and last message timestamps
+    first_last = conn.execute("""
+        SELECT MIN(ts) as first_ts, MAX(ts) as last_ts
+        FROM messages
+    """).fetchone()
+    
+    first_message_ts = first_last["first_ts"] if first_last["first_ts"] else None
+    last_message_ts = first_last["last_ts"] if first_last["last_ts"] else None
     
     conn.close()
     
     return {
-        "total": total,
-        "unique_senders": unique_senders,
-        "unique_recipients": unique_recipients,
-        "messages_with_text": messages_with_text,
-        "messages_without_text": messages_without_text
+        "total_messages": total,
+        "senders_count": senders_count,
+        "messages_per_sender": messages_per_sender_list,
+        "first_message_ts": first_message_ts,
+        "last_message_ts": last_message_ts
     }
 

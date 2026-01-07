@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, PlainTextResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from contextlib import asynccontextmanager
 import time
 import uuid
 import logging
@@ -14,11 +15,25 @@ from app import routers
 # Setup logging
 logger = setup_logging(settings.LOG_LEVEL)
 
-# Create FastAPI app
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan event handler for startup and shutdown."""
+    # Startup
+    logger.info("Initializing database schema...")
+    init_schema()
+    logger.info("Database schema initialized")
+    yield
+    # Shutdown (if needed in the future)
+    pass
+
+
+# Create FastAPI app with lifespan
 app = FastAPI(
     title="FastAPI Backend",
     description="A FastAPI backend application",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 
@@ -75,14 +90,6 @@ app.add_middleware(
 
 # Add request logging middleware (after CORS)
 app.add_middleware(RequestLoggingMiddleware)
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database schema on startup."""
-    logger.info("Initializing database schema...")
-    init_schema()
-    logger.info("Database schema initialized")
 
 
 # Include routers

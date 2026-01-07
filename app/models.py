@@ -51,8 +51,15 @@ def init_db() -> sqlite3.Connection:
     db_path = parse_database_url(settings.DATABASE_URL)
     
     # Create parent directories if they don't exist
+    # Handle read-only filesystem gracefully (e.g., in Docker with mounted volumes)
     db_file = Path(db_path)
-    db_file.parent.mkdir(parents=True, exist_ok=True)
+    if not db_file.parent.exists():
+        try:
+            db_file.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            # Directory may be created by Docker/mounts, or filesystem is read-only
+            # Continue - SQLite will create the file if parent exists or is accessible
+            pass
     
     # Connect to database
     conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -80,7 +87,16 @@ def init_schema():
     """
     Initialize database schema on startup.
     This function should be called when the application starts.
+    Handles errors gracefully for cases where database directory doesn't exist yet.
     """
-    conn = init_db()
-    conn.close()
+    try:
+        conn = init_db()
+        conn.close()
+    except sqlite3.OperationalError as e:
+        # Database file or directory may not exist yet (e.g., in Docker with mounted volumes)
+        # Log warning but don't crash startup - database will be created on first use
+        import logging
+        logger = logging.getLogger("app")
+        logger.warning(f"Could not initialize database schema: {e}. Database will be created on first use.")
+        # Don't re-raise - allow app to start, database will be created on first access
 
