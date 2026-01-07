@@ -6,7 +6,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_PATH=/data/messages.db
+      - DATABASE_URL=sqlite:////data/app.db
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:-your-secret-key-change-in-production}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENVIRONMENT=${ENVIRONMENT:-production}
