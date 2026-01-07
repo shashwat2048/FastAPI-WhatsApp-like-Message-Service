@@ -20,8 +20,8 @@ router = APIRouter()
 class WebhookPayload(BaseModel):
     """Webhook payload model."""
     message_id: str = Field(..., min_length=1)
-    from_msisdn: str = Field(..., pattern=r'^\+?\d{1,15}$')  # E.164-like (more lenient)
-    to_msisdn: str = Field(..., pattern=r'^\+?\d{1,15}$')  # E.164-like (more lenient)
+    from_msisdn: str = Field(..., alias="from", pattern=r'^\+\d{1,15}$')  
+    to_msisdn: str = Field(..., alias="to", pattern=r'^\+\d{1,15}$')  
     ts: str = Field(...)  # ISO-8601 UTC with Z
     text: Optional[str] = Field(None, max_length=4096)
     
