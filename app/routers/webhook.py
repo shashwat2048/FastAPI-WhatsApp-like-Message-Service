@@ -25,6 +25,8 @@ class WebhookPayload(BaseModel):
     ts: str = Field(...)  # ISO-8601 UTC with Z
     text: Optional[str] = Field(None, max_length=4096)
     
+    model_config = {"populate_by_name": True}  # Allow both field name and alias
+    
     @field_validator('ts')
     @classmethod
     def validate_ts(cls, v: str) -> str:
