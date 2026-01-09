@@ -391,7 +391,9 @@ curl http://localhost:8000/metrics
 
 ## Testing
 
-Run tests with:
+### Automated Tests
+
+Run unit tests with:
 ```bash
 make test
 ```
@@ -399,6 +401,283 @@ make test
 Or directly:
 ```bash
 pytest tests/ -v
+```
+
+### Manual Testing Guide
+
+This guide provides step-by-step instructions for manually testing the service end-to-end, exactly as it would be evaluated.
+
+#### 0️⃣ Preconditions (Quick Check)
+
+Make sure you have:
+
+- Docker & Docker Compose
+- `curl`
+- `jq` (for pretty output)
+
+Verify installations:
+```bash
+docker --version
+docker compose version
+jq --version
+```
+
+#### 1️⃣ Start the Stack (EXACTLY like evaluation)
+
+From your repo root:
+
+```bash
+export WEBHOOK_SECRET="testsecret"
+export DATABASE_URL="sqlite:////data/app.db"
+
+make up
+# OR if not using Makefile:
+# docker compose up -d --build
+```
+
+Wait a bit:
+```bash
+sleep 10
+```
+
+Check container is running:
+```bash
+docker compose ps
+```
+
+#### 2️⃣ Health Checks (Must Both Pass)
+
+**Liveness check:**
+```bash
+curl -i http://localhost:8000/health/live
+```
+
+**Expected:**
+```
+HTTP/1.1 200 OK
+```
+
+**Readiness check:**
+```bash
+curl -i http://localhost:8000/health/ready
+```
+
+**Expected:**
+```
+HTTP/1.1 200 OK
+```
+
+❌ **If `/ready` is 503:**
+- Check `WEBHOOK_SECRET`
+- Check DB volume mount
+- Check schema init on startup
+
+#### 3️⃣ Webhook Signature Tests (CRITICAL)
+
+**Define request body (exact string):**
+
+⚠️ **Do not add spaces or newlines accidentally**
+
+```bash
+BODY='{"message_id":"m1","from":"+919876543210","to":"+14155550100","ts":"2025-01-15T10:00:00Z","text":"Hello"}'
+```
+
+**3.1 Invalid signature → 401**
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -H "Content-Type: application/json" \
+  -H "X-Signature: 123" \
+  -d "$BODY" \
+  http://localhost:8000/webhook
+```
+
+**Expected output:**
+```
+401
+```
+
+**3.2 Compute VALID signature (helper)**
+
+**Option A — Python (recommended):**
+```bash
+python - << 'EOF'
+import hmac, hashlib
+secret = b"testsecret"
+body = b'{"message_id":"m1","from":"+919876543210","to":"+14155550100","ts":"2025-01-15T10:00:00Z","text":"Hello"}'
+sig = hmac.new(secret, body, hashlib.sha256).hexdigest()
+print(sig)
+EOF
+```
+
+Copy the output and set:
+```bash
+export VALID_SIG=<paste_here>
+```
+
+**3.3 Valid signature → 200 (insert)**
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -H "Content-Type: application/json" \
+  -H "X-Signature: $VALID_SIG" \
+  -d "$BODY" \
+  http://localhost:8000/webhook
+```
+
+**Expected:**
+```
+200
+```
+
+**3.4 Duplicate insert → still 200 (idempotent)**
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -H "Content-Type: application/json" \
+  -H "X-Signature: $VALID_SIG" \
+  -d "$BODY" \
+  http://localhost:8000/webhook
+```
+
+**Expected:**
+```
+200
+```
+
+#### 4️⃣ Seed More Messages (for /messages & /stats)
+
+**Example second message:**
+```bash
+BODY2='{"message_id":"m2","from":"+911234567890","to":"+14155550100","ts":"2025-01-15T09:00:00Z","text":"Earlier"}'
+```
+
+**Compute signature:**
+```bash
+python - << 'EOF'
+import hmac, hashlib
+secret = b"testsecret"
+body = b'{"message_id":"m2","from":"+911234567890","to":"+14155550100","ts":"2025-01-15T09:00:00Z","text":"Earlier"}'
+print(hmac.new(secret, body, hashlib.sha256).hexdigest())
+EOF
+```
+
+Set the signature:
+```bash
+export SIG2=<paste_here>
+```
+
+**Send:**
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -H "Content-Type: application/json" \
+  -H "X-Signature: $SIG2" \
+  -d "$BODY2" \
+  http://localhost:8000/webhook
+```
+
+Repeat with 1–2 more messages if you want stronger coverage.
+
+#### 5️⃣ Test /messages (Pagination & Filters)
+
+**5.1 Basic list**
+```bash
+curl -s http://localhost:8000/messages | jq .
+```
+
+**Verify:**
+- `data` exists
+- `total` ≥ number of seeded messages
+- Ordering: `ts` ASC, then `message_id` ASC
+
+**5.2 Pagination**
+```bash
+curl -s "http://localhost:8000/messages?limit=2&offset=0" | jq '.data | length'
+```
+
+**Expected:**
+```
+2
+```
+
+**5.3 Filter by from**
+```bash
+curl -s "http://localhost:8000/messages?from=+919876543210" | jq .
+```
+
+**Verify:**
+- Only messages from that sender
+- `total` reflects full filtered count
+
+**5.4 since filter**
+```bash
+curl -s "http://localhost:8000/messages?since=2025-01-15T09:30:00Z" | jq .
+```
+
+**Verify:**
+- Only messages with `ts >= since`
+
+**5.5 text search**
+```bash
+curl -s "http://localhost:8000/messages?q=Hello" | jq .
+```
+
+**Verify:**
+- Case-insensitive substring match
+
+#### 6️⃣ Test /stats
+```bash
+curl -s http://localhost:8000/stats | jq .
+```
+
+**Verify:**
+- `total_messages` == number of unique `message_id` inserted
+- `senders_count` correct
+- `messages_per_sender` sorted desc
+- `first_message_ts` = min(ts)
+- `last_message_ts` = max(ts)
+
+#### 7️⃣ Test /metrics (OPTIONAL but recommended)
+```bash
+curl -s http://localhost:8000/metrics | head
+```
+
+**Verify output contains lines starting with:**
+- `http_requests_total`
+- `webhook_requests_total`
+
+Status must be 200.
+
+#### 8️⃣ Check Logs (VERY IMPORTANT)
+```bash
+docker compose logs api | head -n 20
+```
+
+Then validate JSON:
+```bash
+docker compose logs api | jq .
+```
+
+**Verify:**
+- One JSON object per line
+- Fields:
+  - `ts`
+  - `level`
+  - `request_id`
+  - `method`
+  - `path`
+  - `status`
+  - `latency_ms`
+- `/webhook` logs include:
+  - `message_id`
+  - `dup`
+  - `result`
+
+#### 9️⃣ Shutdown (Clean)
+```bash
+make down
+# OR
+# docker compose down -v
 ```
 ## Design Decisions
 
